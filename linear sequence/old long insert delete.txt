@@ -1,0 +1,286 @@
+#include <stdlib.h>
+#include <mem.h>
+#include "LINEAR_SEQUENCE.h"
+
+/*When I wrote this code, only God and I known what I had to do. Now even God doesn't.*/
+
+#define DynamicArrayGrowthFactor 2
+#define INSERT 1
+#define DELETE -1
+#define FALSE 0
+#define TRUE !FALSE
+#define StartContainerSize 1
+#define IS_INVALID(handle)(handle == LSQ_HandleInvalid)
+
+typedef enum {
+    BEFOREFIRST,
+    DEREFENCABLE,
+    PASTREAR,
+    UNKNOWN,
+} IteratorState;
+
+typedef struct {
+    LSQ_BaseTypeT *ArrData;
+    LSQ_IntegerIndexT FirstIndex, LastIndex;
+    int RealSize, VirtualSize;
+} Container, *ContainerP;
+
+typedef struct {
+    ContainerP Container;
+    LSQ_IntegerIndexT Current;
+} Iterator, *IteratorP;
+
+/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+ * My internal functions needed to simplify code of some API functions *
+ -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*/
+static IteratorState GetState(IteratorP iter) {
+    if (IS_INVALID(iter)) return UNKNOWN;
+    ContainerP cont = iter->Container;
+    if ((iter->Current >= 0) && ((iter->Current < cont->VirtualSize)))
+        return DEREFENCABLE;
+    if (iter->Current < 0)
+        return BEFOREFIRST;
+    if (iter->Current >= cont->VirtualSize)
+        return PASTREAR;
+    return UNKNOWN;
+}
+
+static IteratorP CreateIterator(ContainerP cont, int index) {
+    IteratorP iter = (IteratorP) malloc(sizeof(Iterator));
+    if (IS_INVALID(iter))
+        return LSQ_HandleInvalid;
+    iter->Container = cont;
+    iter->Current = index;
+    return iter;
+}
+
+static void TailMove(ContainerP cont, int oldSize);
+
+static void SetContainerSize(ContainerP cont, int size) {
+    if (IS_INVALID(cont))
+        return;
+    LSQ_BaseTypeT *buff = (LSQ_BaseTypeT *) realloc(cont->ArrData, size * sizeof(LSQ_BaseTypeT));
+    if (IS_INVALID(buff))
+        return;
+    int oldSize = cont->RealSize;
+    cont->ArrData = buff;
+    cont->RealSize = size;
+    if (cont->FirstIndex > cont->LastIndex)
+        TailMove(cont, oldSize);
+}
+
+static void TailMove(ContainerP cont, int oldSize) {
+    int sizeOfTale = (oldSize - cont->FirstIndex);
+    LSQ_BaseTypeT *buff = (LSQ_BaseTypeT *) malloc(sizeOfTale * sizeof(LSQ_BaseTypeT));
+    memcpy(buff, cont->ArrData + cont->FirstIndex, sizeOfTale * sizeof(LSQ_BaseTypeT));
+    memcpy(cont->ArrData + cont->RealSize - sizeOfTale, buff, sizeOfTale * sizeof(LSQ_BaseTypeT));
+    cont->FirstIndex = cont->RealSize - sizeOfTale;
+    free(buff);
+}
+
+static void DataShift(ContainerP cont, LSQ_IntegerIndexT index, int size, int dir) {
+    LSQ_BaseTypeT *buff = (LSQ_BaseTypeT *) malloc(size * sizeof(LSQ_BaseTypeT));
+    memcpy(buff, cont->ArrData + index, size * sizeof(LSQ_BaseTypeT));
+    memcpy(cont->ArrData + index + dir, buff, size * sizeof(LSQ_BaseTypeT));
+    free(buff);
+}
+
+static void ChangeBorders(ContainerP cont, IteratorP iter, int op){
+    LSQ_IntegerIndexT current_index = (cont->FirstIndex + iter->Current) % cont->RealSize;
+    if ((cont->FirstIndex > cont->LastIndex) && (current_index >= cont->FirstIndex)) {
+            DataShift(cont, op == DELETE ? 1 : 0, cont->LastIndex + (op == DELETE ? 0 : 1), op);
+            cont->ArrData[op == DELETE ? cont->RealSize - 1 : 0] = cont->ArrData[op == DELETE ? 0 : cont->RealSize - 1];
+            if (current_index < cont->RealSize - 1){
+                int c = (op == DELETE ? 1 : 0);
+                DataShift(cont, current_index + (op == DELETE ? 1 : 0), cont->RealSize - current_index - (op == DELETE ? 1 : 0), op);
+            }
+        } else {
+            DataShift(cont, current_index + (op == DELETE ? 1 : 0), cont->VirtualSize - iter->Current - (op == DELETE ? 1 : 0), op);
+        }
+}
+/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+ * Implementation of API functions *
+ -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*/
+LSQ_HandleT LSQ_CreateSequence(void) {
+    ContainerP cont = (ContainerP) malloc(sizeof(Container));
+    if (IS_INVALID(cont))
+        return LSQ_HandleInvalid;
+    cont->ArrData = (LSQ_BaseTypeT *) malloc(StartContainerSize * sizeof(LSQ_BaseTypeT));
+    cont->FirstIndex = cont->LastIndex = 0;
+    cont->VirtualSize = 0;
+    cont->RealSize = StartContainerSize;
+    return (LSQ_HandleT) cont;
+}
+
+void LSQ_DestroySequence(LSQ_HandleT handle) {
+    if (IS_INVALID(handle))
+        return;
+    ContainerP cont = (ContainerP) handle;
+    if (!IS_INVALID(cont->ArrData))
+        free(cont->ArrData);
+    free(handle);
+}
+
+LSQ_IntegerIndexT LSQ_GetSize(LSQ_HandleT handle) {
+    return (IS_INVALID(handle) ? -1 : ((ContainerP) handle)->VirtualSize);
+}
+
+int LSQ_IsIteratorDereferencable(LSQ_IteratorT iterator) {
+    return (GetState((IteratorP) iterator) == DEREFENCABLE ? TRUE : FALSE);
+}
+
+int LSQ_IsIteratorPastRear(LSQ_IteratorT iterator) {
+    return (GetState((IteratorP) iterator) == PASTREAR ? TRUE : FALSE);
+}
+
+int LSQ_IsIteratorBeforeFirst(LSQ_IteratorT iterator) {
+    return GetState((IteratorP) iterator) == BEFOREFIRST ? TRUE : FALSE;
+}
+
+LSQ_BaseTypeT *LSQ_DereferenceIterator(LSQ_IteratorT iterator) {
+    if (!LSQ_IsIteratorDereferencable(iterator))
+        return LSQ_HandleInvalid;
+    IteratorP iter = (IteratorP) iterator;
+    int index = (iter->Container->FirstIndex + iter->Current) % iter->Container->RealSize;
+    return iter->Container->ArrData + index;
+}
+
+LSQ_IteratorT LSQ_GetElementByIndex(LSQ_HandleT handle, LSQ_IntegerIndexT index) {
+    if (IS_INVALID(handle))
+        return LSQ_HandleInvalid;
+    return CreateIterator((ContainerP) handle, index);;
+}
+
+LSQ_IteratorT LSQ_GetFrontElement(LSQ_HandleT handle) {
+    return LSQ_GetElementByIndex(handle, 0);
+}
+
+LSQ_IteratorT LSQ_GetPastRearElement(LSQ_HandleT handle) {
+    return LSQ_GetElementByIndex(handle, IS_INVALID(handle) ? 0 : ((ContainerP) handle)->VirtualSize);
+}
+
+void LSQ_DestroyIterator(LSQ_IteratorT iterator) {
+    if (!IS_INVALID(iterator))
+        free(iterator);
+}
+
+void LSQ_ShiftPosition(LSQ_IteratorT iterator, LSQ_IntegerIndexT shift) {
+    if (!IS_INVALID(iterator))
+        ((IteratorP) iterator)->Current += shift;
+}
+
+void LSQ_AdvanceOneElement(LSQ_IteratorT iterator) {
+    LSQ_ShiftPosition(iterator, 1);
+}
+
+void LSQ_RewindOneElement(LSQ_IteratorT iterator) {
+    LSQ_ShiftPosition(iterator, -1);
+}
+
+void LSQ_SetPosition(LSQ_IteratorT iterator, LSQ_IntegerIndexT pos) {
+    if (!IS_INVALID(iterator))
+        LSQ_ShiftPosition(iterator, pos - ((IteratorP) iterator)->Current);
+}
+
+void LSQ_InsertElementBeforeGiven(LSQ_IteratorT iterator, LSQ_BaseTypeT newElement) {
+    if (IS_INVALID(iterator) || LSQ_IsIteratorBeforeFirst(iterator))
+        return;
+    IteratorP iter = (IteratorP) iterator;
+    ContainerP cont = iter->Container;
+    if (cont->VirtualSize == cont->RealSize)
+        SetContainerSize(cont, cont->RealSize * DynamicArrayGrowthFactor);
+    if (iter->Current == 0) {
+        LSQ_InsertFrontElement((LSQ_HandleT) iter->Container, newElement);
+        return;
+    }
+    if (iter->Current == cont->VirtualSize) {
+        LSQ_InsertRearElement((LSQ_HandleT) iter->Container, newElement);
+        return;
+    }
+    if (LSQ_IsIteratorDereferencable(iterator)) {
+        ChangeBorders(cont, iter, INSERT);
+        /*LSQ_IntegerIndexT current_index = (cont->FirstIndex + iter->Current) % cont->RealSize;
+        if ((cont->FirstIndex > cont->LastIndex) && (current_index >= cont->FirstIndex)) {
+                DataShift(cont, 0, cont->LastIndex + 1, INSERT);
+                cont->ArrData[0] = cont->ArrData[cont->RealSize - 1];
+                if (current_index < cont->RealSize - 1)
+                    DataShift(cont, current_index, cont->RealSize - current_index, INSERT);
+            } else {
+                DataShift(cont, current_index, cont->VirtualSize - iter->Current, INSERT);
+            }*/
+    } else
+        return;
+    cont->LastIndex = (++cont->LastIndex) % cont->RealSize;
+    cont->ArrData[(cont->FirstIndex + iter->Current) % cont->RealSize] = newElement;
+    cont->VirtualSize++;
+}
+
+void LSQ_InsertFrontElement(LSQ_HandleT handle, LSQ_BaseTypeT element) {
+    if (IS_INVALID(handle))
+        return;
+    ContainerP cont = (ContainerP) handle;
+    if (cont->VirtualSize == cont->RealSize)
+        SetContainerSize(cont, cont->RealSize * DynamicArrayGrowthFactor);
+    cont->FirstIndex = (cont->FirstIndex + cont->RealSize - 1) % cont->RealSize;
+    cont->ArrData[cont->FirstIndex] = element;
+    cont->VirtualSize++;
+}
+
+void LSQ_InsertRearElement(LSQ_HandleT handle, LSQ_BaseTypeT element) {
+    if (IS_INVALID(handle))
+        return;
+    ContainerP cont = (ContainerP) handle;
+    if (cont->VirtualSize == cont->RealSize)
+        SetContainerSize(cont, cont->RealSize * DynamicArrayGrowthFactor);
+    cont->LastIndex = (cont->LastIndex + cont->RealSize + 1) % cont->RealSize;
+    cont->ArrData[cont->LastIndex] = element;
+    cont->VirtualSize++;
+}
+
+void LSQ_DeleteGivenElement(LSQ_IteratorT iterator) {
+    if (IS_INVALID(iterator) || LSQ_IsIteratorBeforeFirst(iterator) || LSQ_IsIteratorPastRear(iterator))
+        return;
+    IteratorP iter = (IteratorP) iterator;
+    ContainerP cont = iter->Container;
+    if (LSQ_GetSize((LSQ_HandleT) cont) == 0)
+        return;
+    if (iter->Current == 0) {
+        LSQ_DeleteFrontElement((LSQ_HandleT) iter->Container);
+        return;
+    }
+    if (iter->Current == cont->VirtualSize - 1) {
+        LSQ_DeleteRearElement((LSQ_HandleT) iter->Container);
+        return;
+    }
+    if (LSQ_IsIteratorDereferencable(iterator)) {
+        ChangeBorders(cont, iter, DELETE);
+        /*LSQ_IntegerIndexT current_index = (cont->FirstIndex + iter->Current) % cont->RealSize;
+        if ((cont->FirstIndex > cont->LastIndex) && (current_index >= cont->FirstIndex)) {
+                DataShift(cont, 1, cont->LastIndex, DELETE);
+                cont->ArrData[cont->RealSize - 1] = cont->ArrData[0];
+                if (current_index < cont->RealSize - 1)
+                    DataShift(cont, current_index + 1, cont->RealSize - current_index - 1, DELETE);
+            } else {
+                DataShift(cont, current_index + 1, cont->VirtualSize - iter->Current - 1, DELETE);
+            }*/
+    } else
+        return;
+    cont->VirtualSize--;
+}
+
+void LSQ_DeleteFrontElement(LSQ_HandleT handle) {
+    if (IS_INVALID(handle) || (((ContainerP) handle)->VirtualSize <= 0))
+        return;
+    ContainerP cont = (ContainerP) handle;
+    cont->FirstIndex = (cont->FirstIndex + cont->RealSize + 1) % cont->RealSize;
+    cont->VirtualSize--;
+
+}
+
+void LSQ_DeleteRearElement(LSQ_HandleT handle) {
+    if (IS_INVALID(handle) || (((ContainerP) handle)->VirtualSize <= 0))
+        return;
+    ContainerP cont = (ContainerP) handle;
+    cont->LastIndex = (cont->LastIndex + cont->RealSize - 1) % cont->RealSize;
+    cont->VirtualSize--;
+}

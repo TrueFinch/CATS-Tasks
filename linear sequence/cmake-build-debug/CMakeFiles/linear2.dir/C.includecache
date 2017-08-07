@@ -1,0 +1,36 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+C:/Users/ADMIN/CLionProjects/linear2/LINEAR_SEQUENCE.c
+stdlib.h
+-
+mem.h
+-
+LINEAR_SEQUENCE.h
+C:/Users/ADMIN/CLionProjects/linear2/LINEAR_SEQUENCE.h
+stdbool.h
+-
+
+C:/Users/ADMIN/CLionProjects/linear2/LINEAR_SEQUENCE.h
+stdlib.h
+-
+
+C:/Users/ADMIN/CLionProjects/linear2/linear_sequence.h
+stdlib.h
+-
+
+C:/Users/ADMIN/CLionProjects/linear2/main.c
+stdlib.h
+-
+stdio.h
+-
+stdarg.h
+-
+linear_sequence.h
+C:/Users/ADMIN/CLionProjects/linear2/linear_sequence.h
+
